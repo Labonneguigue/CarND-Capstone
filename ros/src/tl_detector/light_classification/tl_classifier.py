@@ -3,6 +3,7 @@ import numpy as np
 import tensorflow as tf
 import cv2
 
+import rospy
 from styx_msgs.msg import TrafficLight
 
 
@@ -16,7 +17,8 @@ class TLClassifier(object):
         # http://download.tensorflow.org/models/object_detection/ssd_mobilenet_v1_coco_11_06_2017.tar.gz
         # It has been released by the Tensorflow Object Detection API team:
         # https://github.com/tensorflow/models/tree/master/research/object_detection
-        PATH_TO_CKPT = os.path.join(current_dir, 'ssd_mobilenet_v1_coco_11_06_2017', 'frozen_inference_graph.pb')
+        # PATH_TO_CKPT = os.path.join(current_dir, 'ssd_mobilenet_v1_coco_11_06_2017', 'frozen_inference_graph.pb')
+        PATH_TO_CKPT = os.path.join(current_dir, 'rfcn_resnet101_coco_11_06_2017', 'frozen_inference_graph.pb')
 
         self.detection_graph = tf.Graph()
         with self.detection_graph.as_default():
@@ -39,9 +41,10 @@ class TLClassifier(object):
         """
 
         # Some of this code is adapted from the TensorFlow Object Detection API tutorial.
-        image = cv2.resize(image, (298, 224), interpolation=cv2.INTER_LINEAR)
+        # image_np = cv2.resize(image, (298, 224), interpolation=cv2.INTER_LINEAR)
+        image_np = cv2.resize(image, (400, 300), interpolation=cv2.INTER_LINEAR)
         # Expand dimensions since the model expects images to have shape: [1, None, None, 3]
-        image_np_expanded = np.expand_dims(image, axis=0)
+        image_np_expanded = np.expand_dims(image_np, axis=0)
         image_tensor = self.detection_graph.get_tensor_by_name('image_tensor:0')
         # Each box represents a part of the image where a particular object was detected.
         boxes = self.detection_graph.get_tensor_by_name('detection_boxes:0')
@@ -56,28 +59,70 @@ class TLClassifier(object):
             feed_dict={image_tensor: image_np_expanded})
         # Extract the indices corresponding to detection of traffic lights (Traffic Light is COCO class number 10).
         traffic_light_indices = np.arange(classes.size)[classes[0] == 10]
-        for traffic_light_i in traffic_light_indices[:10]:
-            box = boxes[0, traffic_light_i]
-            height, width = image.shape[:2]
-            box[0] *= height
-            box[2] *= height
-            box[1] *= width
-            box[3] *= width
-            box = np.round(box).astype(np.int)
-            box[2] = np.minimum(box[2] + 1, height)
-            box[3] = np.minimum(box[3] + 1, width)
-            y1, x1, y2, x2 = box
-            img_crop = image[y1:y2, x1:x2]
-            score_r = np.max(np.exp(-np.sum((img_crop - [250, 50, 50]) ** 2, axis=2) / 255))
-            score_y = np.max(np.exp(-np.sum((img_crop - [250, 250, 50]) ** 2, axis=2) / 255))
-            score_g = np.max(np.exp(-np.sum((img_crop - [60, 250, 80]) ** 2, axis=2) / 255))
-            score = np.max([score_r, score_y, score_g])
-            if score > 1e-4:
-                if score_r > score_y and score_r > score_g:
-                    return TrafficLight.RED
-                elif score_y > score_g:
-                    return TrafficLight.YELLOW
-                else:
-                    return TrafficLight.GREEN
+        # for traffic_light_i in traffic_light_indices[:10]:
+        #     box = boxes[0, traffic_light_i]
+        #     height, width = image.shape[:2]
+        #     box[0] *= height
+        #     box[2] *= height
+        #     box[1] *= width
+        #     box[3] *= width
+        #     box = np.round(box).astype(np.int)
+        #     box[2] = np.minimum(box[2] + 1, height)
+        #     box[3] = np.minimum(box[3] + 1, width)
+        #     y1, x1, y2, x2 = box
+        #     img_crop = image[y1:y2, x1:x2]
+        #     score_r = np.max(np.exp(-np.sum((img_crop - [250, 50, 50]) ** 2, axis=2) / 255))
+        #     score_y = np.max(np.exp(-np.sum((img_crop - [250, 250, 50]) ** 2, axis=2) / 255))
+        #     score_g = np.max(np.exp(-np.sum((img_crop - [60, 250, 80]) ** 2, axis=2) / 255))
+        #     score = np.max([score_r, score_y, score_g])
+        #     if score > 1e-4:
+        #         if score_r > score_y and score_r > score_g:
+        #             return TrafficLight.RED
+        #         elif score_y > score_g:
+        #             return TrafficLight.YELLOW
+        #         else:
+        #             return TrafficLight.GREEN
 
-        return TrafficLight.UNKNOWN
+        boxes = boxes[:, traffic_light_indices]
+        scores = scores[:, traffic_light_indices]
+
+        if boxes.size == 0:
+            return TrafficLight.UNKNOWN
+
+        box = boxes[0, 0]
+        score = scores[0, 0]
+
+        if score < 0.05:
+            return TrafficLight.UNKNOWN
+
+        height, width = image.shape[:2]
+        box[0] *= height
+        box[2] *= height
+        box[1] *= width
+        box[3] *= width
+        box = np.round(box).astype(np.int)
+        box[2] = np.minimum(box[2] + 1, height)
+        box[3] = np.minimum(box[3] + 1, width)
+        print(box)
+        y1, x1, y2, x2 = box
+        img_crop = image[y1:y2, x1:x2]
+        h, w = img_crop.shape[:2]
+        x1, x2 = w // 4, 3 * w // 4
+        y1, y2 = h // 12, h // 4
+        y3, y4 = 5 * h // 12, 7 * h // 12
+        y5, y6 = 3 * h // 4, 11 * h // 12
+        img_r = img_crop[y1:y2, x1:x2]
+        img_y = img_crop[y3:y4, x1:x2]
+        img_g = img_crop[y5:y6, x1:x2]
+        avg_r = img_r.mean()
+        avg_y = img_y.mean()
+        avg_g = img_g.mean()
+        rospy.logdebug(['avg TL lights:', avg_r, avg_y, avg_g])
+
+        if avg_r >= avg_g and avg_r >= avg_y:
+            return TrafficLight.RED
+        elif avg_y >= avg_g:
+            return TrafficLight.YELLOW
+        else:
+            return TrafficLight.GREEN
+
