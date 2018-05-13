@@ -3,7 +3,6 @@ import numpy as np
 import tensorflow as tf
 import cv2
 
-import rospy
 from styx_msgs.msg import TrafficLight
 
 
@@ -12,11 +11,14 @@ class TLClassifier(object):
     def __init__(self):
         current_dir = os.path.dirname(__file__)
         
-        # We use a SSD detector with a Mobilenet classifier, pretrained on COCO detection task.
-        # The frozen graph is compatible with TensorFlow 1.3. It is avilable at the following url:
+        # We use a SSD detector with a Mobilenet classifier, pretrained on COCO detection task or a RFCN detector with
+        # ResNet 101 classifier, pretrained on COCO detection.
+        # The frozen graphs are compatible with TensorFlow 1.3. It is avilable at the following url:
         # http://download.tensorflow.org/models/object_detection/ssd_mobilenet_v1_coco_11_06_2017.tar.gz
+        # http://download.tensorflow.org/models/object_detection/rfcn_resnet101_coco_11_06_2017.tar.gz
         # It has been released by the Tensorflow Object Detection API team:
         # https://github.com/tensorflow/models/tree/master/research/object_detection
+
         # PATH_TO_CKPT = os.path.join(current_dir, 'ssd_mobilenet_v1_coco_11_06_2017', 'frozen_inference_graph.pb')
         PATH_TO_CKPT = os.path.join(current_dir, 'rfcn_resnet101_coco_11_06_2017', 'frozen_inference_graph.pb')
 
@@ -41,8 +43,13 @@ class TLClassifier(object):
         """
 
         # Some of this code is adapted from the TensorFlow Object Detection API tutorial.
+
+        # Following resize for SSD + MobileNet.
         # image_np = cv2.resize(image, (298, 224), interpolation=cv2.INTER_LINEAR)
+
+        # RFCN + ResNet can take image of arbitrary size as input.
         image_np = cv2.resize(image, (400, 300), interpolation=cv2.INTER_LINEAR)
+
         # Expand dimensions since the model expects images to have shape: [1, None, None, 3]
         image_np_expanded = np.expand_dims(image_np, axis=0)
         image_tensor = self.detection_graph.get_tensor_by_name('image_tensor:0')
@@ -59,6 +66,9 @@ class TLClassifier(object):
             feed_dict={image_tensor: image_np_expanded})
         # Extract the indices corresponding to detection of traffic lights (Traffic Light is COCO class number 10).
         traffic_light_indices = np.arange(classes.size)[classes[0] == 10]
+
+        ## Following code to classify TL state doesn't work in site mode but works in the simulator.
+
         # for traffic_light_i in traffic_light_indices[:10]:
         #     box = boxes[0, traffic_light_i]
         #     height, width = image.shape[:2]
@@ -117,7 +127,6 @@ class TLClassifier(object):
         avg_r = img_r.mean()
         avg_y = img_y.mean()
         avg_g = img_g.mean()
-        rospy.logdebug(['avg TL lights:', avg_r, avg_y, avg_g])
 
         if avg_r >= avg_g and avg_r >= avg_y:
             return TrafficLight.RED
